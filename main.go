@@ -57,7 +57,9 @@ func main() {
 func ChownR(dir string, uid, gid int) error {
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err == nil {
-			err = os.Chown(path, uid, gid)
+			if d.Type()&fs.ModeSymlink == 0 {
+				err = os.Chown(path, uid, gid)
+			}
 		}
 		return err
 	})
