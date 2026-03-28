@@ -4,31 +4,14 @@ import (
 	"io/fs"
 	"log"
 	"os"
-	"os/user"
 	"path/filepath"
-	"strconv"
 )
 
 var chownDir string
 
 func main() {
-	u, err := user.Current()
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	iUid, err := strconv.Atoi(u.Uid)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	iGid, err := strconv.Atoi(u.Gid)
-	if err != nil {
-		log.Println(err)
-		return
-	}
+	uid := os.Getuid()
+	gid := os.Getgid()
 
 	if chownDir == "" {
 		log.Printf("Must be compiled with a valid directory to chown")
@@ -47,8 +30,8 @@ func main() {
 		return
 	}
 
-	log.Printf("Chown %d:%d %s", iUid, iGid, dir)
-	err = ChownR(dir, iUid, iGid)
+	log.Printf("Chown %d:%d %s", uid, gid, dir)
+	err = ChownR(dir, uid, gid)
 	if err != nil {
 		log.Println(err)
 	}
