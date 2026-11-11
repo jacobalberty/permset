@@ -1,0 +1,120 @@
+name: Release
+
+# Two ways to cut a release:
+#   1. Push a tag like v1.2.3                -> releases that tag.
+#   2. Run this workflow manually (dispatch) -> releases the given version, or,
+#      if left empty, the next semver computed from the latest release tag and
+#      the conventional commits since then (feat! / BREAKING CHANGE = major,
+#      feat = minor, anything else = patch). The tag is created for you.
+
+on:
+  push:
+    tags: [ 'v[0-9]+.[0-9]+.[0-9]+*' ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (vX.Y.Z). Leave empty to compute automatically.'
+        required: false
+        type: string
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Determine version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.pick.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Compute next semver from conventional commits
+        id: semver
+        if: github.event_name == 'workflow_dispatch' && inputs.version == ''
+        uses: paulhatch/semantic-version@v6.0.7
+        with:
+          tag_prefix: "v"
+          major_pattern: "/^[a-z]+(\\(.+\\))?!:|BREAKING[ -]CHANGE/"
+          major_regexp_flags: "m"
+          minor_pattern: "/^feat(\\(.+\\))?:/"
+          minor_regexp_flags: "m"
+          version_format: "${major}.${minor}.${patch}"
+          bump_each_commit: false
+          search_commit_body: true
+
+      - name: Pick version
+        id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT: ${{ inputs.version }}
+          COMPUTED: ${{ steps.semver.outputs.version }}
+        run: |
+          if [ "$EVENT" = "push" ]; then
+            v="$REF_NAME"
+          elif [ -n "$INPUT" ]; then
+            v="$INPUT"
+          else
+            v="v$COMPUTED"
+          fi
+          if ! [[ "$v" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$v' is not a valid vX.Y.Z version"
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Releasing $v" >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Tag and publish release
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Tags pushed with GITHUB_TOKEN do not trigger other workflows, so this
+      # does not cause a second run of this workflow.
+      - name: Create tag (manual dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            # Allow re-running a release whose tag was already created for this commit
+            if [ "$(git rev-parse "$VERSION^{commit}")" = "$(git rev-parse HEAD)" ]; then
+              echo "Tag $VERSION already exists at HEAD, reusing it"
+              exit 0
+            fi
+            echo "::error::Tag $VERSION already exists at a different commit"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"
+
+      - name: Generate changelog from conventional commits
+        id: changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          # Built-in config groups conventional commits; works with no prior tag.
+          args: --current --strip header
+        env:
+          OUTPUT: RELEASE_NOTES.md
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: ${{ env.VERSION }}
+          body: ${{ steps.changelog.outputs.content }}
+          prerelease: ${{ contains(env.VERSION, '-') }}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "description": "Dependabot owns dependency, action and Docker updates; Renovate only bumps the go directive in go.mod.",
+  "enabledManagers": ["gomod"],
+  "packageRules": [
+    {
+      "description": "Leave require/tool dependencies to Dependabot",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["require", "indirect", "tool"],
+      "enabled": false
+    }
+  ]
+}
